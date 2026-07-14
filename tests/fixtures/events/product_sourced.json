@@ -1,0 +1,15 @@
+{
+  "event_id": "00000000-0000-0000-0000-000000000002",
+  "type": "product.sourced",
+  "version": 1,
+  "occurred_at": "2026-07-14T19:01:00+00:00",
+  "producer": "agent:source_matcher",
+  "idempotency_key": "product:1:sourced",
+  "correlation_id": "longtail",
+  "payload": {
+    "product_id": 1,
+    "candidate_id": null,
+    "source_count": 1,
+    "correlation_id": "longtail"
+  }
+}

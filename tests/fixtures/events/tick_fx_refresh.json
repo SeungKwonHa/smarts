@@ -1,0 +1,10 @@
+{
+  "event_id": "018fae72-0000-7000-8000-000000000001",
+  "type": "tick.fx_refresh",
+  "version": 1,
+  "occurred_at": "2026-07-14T09:00:00+09:00",
+  "producer": "scheduler",
+  "idempotency_key": "tick.fx_refresh:202607140900",
+  "correlation_id": "tick.fx_refresh:202607140900",
+  "payload": {}
+}

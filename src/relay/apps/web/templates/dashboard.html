@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<h1>Dashboard</h1>
+
+<div class="grid grid-4">
+  <div class="card stat">
+    <div class="label">Live Listings</div>
+    <div class="value">{{ live_listings }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Orders Today</div>
+    <div class="value">{{ orders_today }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Pending Approvals</div>
+    <div class="value {% if pending_approvals > 10 %}alert{% elif pending_approvals == 0 %}ok{% endif %}">
+      {{ pending_approvals }}
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="label">Outbox Lag</div>
+    <div class="value {% if outbox_lag > 100 %}alert{% elif outbox_lag == 0 %}ok{% endif %}">
+      {{ outbox_lag }}
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="label">DLQ Messages</div>
+    <div class="value {% if dlq_count > 0 %}alert{% else %}ok{% endif %}">
+      {{ dlq_count }}
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="label">LLM Tokens (24h)</div>
+    <div class="value">{{ "{:,}".format(llm_tokens_24h) }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">LLM Cost Est. (24h)</div>
+    <div class="value">${{ "%.4f"|format(llm_cost_24h) }}</div>
+  </div>
+</div>
+
+<div class="section-gap">
+  <div class="card">
+    <h2>Agent Metrics</h2>
+    {% if agent_metrics %}
+    <table>
+      <thead>
+        <tr><th>Agent / Metric</th><th>Count</th></tr>
+      </thead>
+      <tbody>
+      {% for key, val in agent_metrics.items() %}
+        <tr>
+          <td>{{ key.replace("metric:agent.", "") }}</td>
+          <td>{{ val }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:#64748b;font-size:0.85rem">No agent metrics yet. Start processing events.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section-gap">
+  <div class="card">
+    <h2>System Status</h2>
+    <table>
+      <thead><tr><th>Component</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Postgres</td>
+            <td><span class="tag tag-green">connected</span></td></tr>
+        <tr><td>Redis</td>
+            <td><span class="tag tag-green">connected</span></td></tr>
+        <tr><td>DRY_RUN</td>
+            <td>
+              {% if dry_run %}
+              <span class="tag tag-yellow">ENABLED — no real writes</span>
+              {% else %}
+              <span class="tag tag-green">disabled — LIVE</span>
+              {% endif %}
+            </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

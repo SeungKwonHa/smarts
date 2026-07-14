@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Approval Queue{% endblock %}
+{% block content %}
+
+<h1>Approval Queue
+  {% if items|length > 0 %}
+  <span style="font-weight:400;font-size:1rem;color:#64748b;">({{ items|length }} pending)</span>
+  {% endif %}
+</h1>
+
+<!-- Kind filter nav -->
+<div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <a href="/approvals" class="btn {% if not current_kind %}btn-gray{% else %}btn-gray{% endif %}"
+     style="{% if not current_kind %}outline: 1px solid #38bdf8;{% endif %}">
+    All <span class="badge" style="background:#334155;color:#94a3b8">
+      {{ kind_counts.values()|sum }}
+    </span>
+  </a>
+  {% for kind, cnt in kind_counts.items() %}
+  <a href="/approvals?kind={{ kind }}" class="btn btn-gray"
+     style="{% if current_kind == kind %}outline: 1px solid #38bdf8;{% endif %}">
+    {{ kind }} <span class="badge" style="background:#334155;color:#94a3b8">{{ cnt }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<!-- Bulk approve form (for publish_batch kind) -->
+{% if items and (not current_kind or current_kind == "publish_batch") %}
+<form method="POST" action="/approvals/bulk-approve" style="margin-bottom:1rem">
+  <input type="hidden" name="decided_by" value="operator">
+  {% for item in items %}
+  {% if item.kind == "publish_batch" %}
+  <input type="hidden" name="approval_ids" value="{{ item.id }}">
+  {% endif %}
+  {% endfor %}
+  <button type="submit" class="btn btn-green"
+          onclick="return confirm('Approve all publish_batch items?')">
+    Bulk Approve All publish_batch ({{ kind_counts.get("publish_batch", 0) }})
+  </button>
+</form>
+{% endif %}
+
+{% if items %}
+<div style="display:flex;flex-direction:column;gap:0.75rem;">
+  {% for item in items %}
+  <div class="card" id="approval-{{ item.id }}">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;">
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+          <span class="tag {% if item.kind == 'risk_review' %}tag-red
+                           {% elif item.kind == 'refund' %}tag-red
+                           {% elif item.kind == 'publish_batch' %}tag-blue
+                           {% else %}tag-yellow{% endif %}">
+            {{ item.kind }}
+          </span>
+          <span style="font-size:0.75rem;color:#64748b;">
+            #{{ item.id }} · {{ item.ref_table }}:{{ item.ref_id }}
+          </span>
+          {% if item.expires_at %}
+          <span style="font-size:0.7rem;color:#ef4444;">
+            expires {{ item.expires_at }}
+          </span>
+          {% endif %}
+        </div>
+        <div class="summary">{{ item.summary }}</div>
+
+        {% if item.proposed_action %}
+        <details style="margin-top:0.5rem;">
+          <summary style="font-size:0.75rem;color:#64748b;cursor:pointer;">
+            Proposed action / evidence
+          </summary>
+          <pre>{{ item.proposed_action | tojson(indent=2) }}</pre>
+          {% if item.evidence %}
+          <pre>{{ item.evidence | tojson(indent=2) }}</pre>
+          {% endif %}
+        </details>
+        {% endif %}
+      </div>
+
+      <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+        <button class="btn btn-green"
+          hx-post="/approvals/{{ item.id }}/approve"
+          hx-target="#approval-{{ item.id }}"
+          hx-swap="outerHTML"
+          hx-vals='{"decided_by": "operator"}'
+          onclick="return confirm('Approve #{{ item.id }}?')">
+          Approve
+        </button>
+        <button class="btn btn-red"
+          hx-post="/approvals/{{ item.id }}/deny"
+          hx-target="#approval-{{ item.id }}"
+          hx-swap="outerHTML"
+          hx-vals='{"decided_by": "operator"}'
+          onclick="return confirm('Deny #{{ item.id }}?')">
+          Deny
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="card" style="text-align:center;padding:3rem;color:#64748b;">
+  <div style="font-size:2rem;margin-bottom:0.5rem;">✓</div>
+  <div>No pending approvals{% if current_kind %} for <strong>{{ current_kind }}</strong>{% endif %}.</div>
+</div>
+{% endif %}
+
+{% endblock %}

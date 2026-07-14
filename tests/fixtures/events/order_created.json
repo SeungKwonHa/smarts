@@ -1,0 +1,15 @@
+{
+  "event_id": "00000000-0000-0000-0000-000000000004",
+  "type": "order.created",
+  "version": 1,
+  "occurred_at": "2026-07-14T10:00:00+00:00",
+  "producer": "agent:order_agent",
+  "idempotency_key": "order:TEST_ITEM_001:created",
+  "correlation_id": "order:1",
+  "payload": {
+    "order_id": 1,
+    "marketplace": "naver",
+    "listing_id": 1,
+    "qty": 1
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "event_id": "00000000-0000-0000-0000-000000000003",
+  "type": "product.priced",
+  "version": 1,
+  "occurred_at": "2026-07-14T19:02:00+00:00",
+  "producer": "agent:pricing",
+  "idempotency_key": "product:1:priced",
+  "correlation_id": "longtail",
+  "payload": {
+    "product_id": 1,
+    "listing_id": 1,
+    "sell_price_krw": 25000,
+    "margin_rate": 0.18,
+    "correlation_id": "longtail"
+  }
+}

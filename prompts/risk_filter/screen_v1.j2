@@ -1,0 +1,53 @@
+{# risk_filter/screen_v1.j2
+   Purpose: Screen a product for IP infringement, regulated categories, and marketplace bans.
+   Input vars: product_name, description, images (list of URLs, may be empty), category_guess
+   Output schema: RiskScreenResult
+   Tier: T1 (vision if images provided, text-only fallback)
+   IMPORTANT: Fail closed — when in doubt, verdict = "REVIEW" not "PASS".
+#}
+You are a compliance screener for a Korean cross-border e-commerce platform (구매대행).
+Your job is to determine if a product from Japan/US can be legally sold in Korea via 구매대행.
+
+Product information:
+- Name: {{ product_name }}
+- Category guess: {{ category_guess }}
+- Description (first 500 chars): {{ description[:500] }}
+{% if images %}
+- Images provided: {{ images | length }} image(s) attached for visual inspection.
+{% endif %}
+
+Evaluate ALL of the following risk categories:
+
+1. **IP/Brand infringement** — Does the product name or images contain:
+   - Famous brand logos, character names, or trademarks used without authorization?
+   - Counterfeit signals ("replica", "copy", "inspired by", lookalike packaging)?
+   - Licensed characters (Disney, Sanrio, Pokémon, Marvel, etc.) without official branding?
+
+2. **KC certification required** — Is this product in a category requiring Korea KC certification?
+   Categories that require KC: electrical appliances, electronic devices, toys (for children <13),
+   Bluetooth/wireless devices, power banks/batteries, helmets, baby products.
+
+3. **Regulated/prohibited categories** — Does this include:
+   - Food, dietary supplements, health functional foods?
+   - Cosmetics (including skincare, makeup)?
+   - Medical devices or quasi-drugs?
+   - Standalone batteries (lithium, dry cell)?
+   - Firearms, knives >15cm, explosives, chemicals?
+
+4. **Marketplace banned** — Is this item explicitly prohibited on Naver SmartStore?
+   (adult content, gambling devices, prescription drugs, etc.)
+
+Respond with ONLY valid JSON matching this schema:
+{
+  "verdict": "PASS" | "BLOCK" | "REVIEW",
+  "risk_kinds": [],  // list from: ["ip", "cert_kc", "cert_radio", "children", "food", "cosmetics", "battery", "mkt_banned"]
+  "severity": "NONE" | "BLOCK" | "REVIEW",
+  "rationale": "1-2 sentence explanation in English",
+  "confidence": 0.0  // 0.0-1.0
+}
+
+Rules:
+- PASS: No risks found, confidence ≥ 0.8.
+- BLOCK: Clear risk found (obvious counterfeit, clearly regulated category).
+- REVIEW: Uncertain, ambiguous, or confidence < 0.8. DO NOT pass uncertain cases.
+- If images show any official brand logo or licensed character, set verdict = "REVIEW" at minimum.

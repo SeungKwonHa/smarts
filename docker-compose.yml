@@ -1,0 +1,92 @@
+version: "3.9"
+
+x-relay-env: &relay-env
+  env_file: .env
+  environment:
+    - RELAY_ENV=${RELAY_ENV:-dev}
+    - RELAY_DRY_RUN=${RELAY_DRY_RUN:-1}
+
+x-relay-base: &relay-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  <<: *relay-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: relay
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay -d relay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Relay workers ────────────────────────────────────────────────────────────
+  relay-scheduler:
+    <<: *relay-base
+    command: python -m relay.scheduler
+    profiles: ["full"]
+
+  relay-intelligence:
+    <<: *relay-base
+    command: python -m relay.intelligence
+    profiles: ["full"]
+
+  relay-listing:
+    <<: *relay-base
+    command: python -m relay.listing
+    profiles: ["full"]
+
+  relay-operations:
+    <<: *relay-base
+    command: python -m relay.operations
+    profiles: ["full"]
+
+  relay-cs:
+    <<: *relay-base
+    command: python -m relay.cs
+    profiles: ["full"]
+
+  relay-analytics:
+    <<: *relay-base
+    command: python -m relay.analytics
+    profiles: ["full"]
+
+  relay-web:
+    <<: *relay-base
+    command: uvicorn relay.apps.web.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    profiles: ["full", "web"]
+
+volumes:
+  postgres_data:
+  redis_data:

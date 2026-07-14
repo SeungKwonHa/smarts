@@ -1,0 +1,10 @@
+{
+  "event_id": "00000000-0000-0000-0000-000000000001",
+  "type": "tick.longtail_expand",
+  "version": 1,
+  "occurred_at": "2026-07-14T19:00:00+00:00",
+  "producer": "scheduler",
+  "idempotency_key": "tick.longtail_expand:202607141900",
+  "correlation_id": "tick:longtail:202607141900",
+  "payload": {}
+}

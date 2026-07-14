@@ -1,0 +1,30 @@
+{# source_matcher/normalize_v1.j2
+   Purpose: Normalize a foreign product name + description into canonical attributes.
+   Input vars: source (rakuten|amazon_jp), name, description, category_guess
+   Output schema: NormalizedProduct
+   Tier: T0 (batch_ok=True)
+#}
+Extract structured product attributes from this Japanese/English product listing.
+Return ONLY valid JSON.
+
+Source: {{ source }}
+Product name: {{ name }}
+Category: {{ category_guess }}
+Description (excerpt): {{ description[:300] }}
+
+Extract:
+{
+  "canonical_name_src": "cleaned English/Japanese product name, remove shop-specific suffixes",
+  "brand": "brand name or empty string",
+  "weight_g": 0,          // estimated weight in grams (0 if unknown)
+  "material": "",         // primary material (metal, plastic, wood, fabric, etc.)
+  "color_options": [],    // list of color names if multi-color product
+  "size_options": [],     // list of size codes/names if multi-size product
+  "category_internal": "" // one of: kitchen|stationery|hobby|camping|electronics|other
+}
+
+Rules:
+- canonical_name_src: Remove shop suffixes like "【送料無料】", "(Japan Import)", store names.
+- brand: Extract if clearly stated; empty string if not stated.
+- weight_g: Use product specs if available; otherwise estimate from category (mug ≈ 300g, pen ≈ 20g, etc.).
+- category_internal: Map to the closest category from the allowed list.
