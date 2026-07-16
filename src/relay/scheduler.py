@@ -13,6 +13,7 @@ never by internal timers. Cadences are:
   tick.tracking_poll   4h
   tick.daily_report    07:00 KST
   tick.weekly_promotion Mon 06:00 KST
+  tick.weekly_narrative Mon 08:00 KST
 
 In DRY_RUN mode: ticks are emitted to the outbox (so the pipeline can be
 walked manually) but external API calls in agents are suppressed.
@@ -152,6 +153,13 @@ async def main() -> None:
         lambda: asyncio.ensure_future(emit_tick("tick.weekly_promotion")),
         CronTrigger(day_of_week="sun", hour=21, minute=0, timezone="UTC"),
         id="weekly_promotion",
+        max_instances=1,
+    )
+    # weekly_narrative  Mon 08:00 KST = Sun 23:00 UTC
+    scheduler.add_job(
+        lambda: asyncio.ensure_future(emit_tick("tick.weekly_narrative")),
+        CronTrigger(day_of_week="sun", hour=23, minute=0, timezone="UTC"),
+        id="weekly_narrative",
         max_instances=1,
     )
 

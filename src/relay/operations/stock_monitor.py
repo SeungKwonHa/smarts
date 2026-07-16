@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from relay.core.agent import BaseAgent
 from relay.core.config import settings
 from relay.core.events import STREAM_LISTING, STREAM_OPS
+from relay.integrations.naver.client import suspend_product, reactivate_product
 from relay.integrations.rakuten.client import get_item as rakuten_get_item
 from relay.integrations.amazon_jp.client import get_product as amazon_jp_get_product, extract_asin_from_url
 
@@ -216,7 +217,7 @@ class StockMonitorAgent(BaseAgent):
         # Stock state change
         if new_state != old_state:
             if new_state == "OOS" and listing_status == "LIVE":
-                # Suspend listing immediately
+                # Suspend listing: DB + Naver API (zero-inventory kill-risk fix)
                 await session.execute(
                     text("""
                         UPDATE listings
@@ -225,6 +226,27 @@ class StockMonitorAgent(BaseAgent):
                     """),
                     {"id": listing_id},
                 )
+                # Also suspend on Naver side so it stops showing in search
+                if not settings.relay_dry_run:
+                    try:
+                        row = await session.execute(
+                            text("SELECT remote_product_id FROM listings WHERE id = :id"),
+                            {"id": listing_id},
+                        )
+                        remote_id = row.scalar()
+                        if remote_id and remote_id != "DRY_RUN_0":
+                            await suspend_product(str(remote_id))
+                            log.info(
+                                "naver_oos_synced",
+                                listing_id=listing_id,
+                                remote_id=remote_id,
+                            )
+                    except Exception as e:
+                        log.error(
+                            "naver_oos_sync_failed",
+                            listing_id=listing_id,
+                            error=str(e),
+                        )
                 log.warning(
                     "listing_suspended_oos",
                     listing_id=listing_id,
@@ -245,7 +267,7 @@ class StockMonitorAgent(BaseAgent):
                 })
 
             elif new_state == "IN_STOCK" and listing_status == "SUSPENDED_STOCKOUT":
-                # Reactivate listing
+                # Reactivate listing: DB + Naver API
                 await session.execute(
                     text("""
                         UPDATE listings
@@ -254,6 +276,27 @@ class StockMonitorAgent(BaseAgent):
                     """),
                     {"id": listing_id},
                 )
+                # Reactivate on Naver side
+                if not settings.relay_dry_run:
+                    try:
+                        row = await session.execute(
+                            text("SELECT remote_product_id FROM listings WHERE id = :id"),
+                            {"id": listing_id},
+                        )
+                        remote_id = row.scalar()
+                        if remote_id and remote_id != "DRY_RUN_0":
+                            await reactivate_product(str(remote_id))
+                            log.info(
+                                "naver_restock_synced",
+                                listing_id=listing_id,
+                                remote_id=remote_id,
+                            )
+                    except Exception as e:
+                        log.error(
+                            "naver_restock_sync_failed",
+                            listing_id=listing_id,
+                            error=str(e),
+                        )
                 log.info(
                     "listing_reactivated",
                     listing_id=listing_id,
