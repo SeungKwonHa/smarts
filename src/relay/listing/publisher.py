@@ -144,23 +144,28 @@ class PublishAgent(BaseAgent):
             for i in imgs_raw if i
         ]
 
+        product_images = content_dict.get("images", img_urls)[:8]
         product = NaverProduct(
             name=title or "상품명 없음",
             category_id=cat_naver or "50000803",
             sell_price=sell_price or 0,
-            images=content_dict.get("images", img_urls)[:8],
+            images=product_images,
             detail_html=content_dict.get("detail_html", ""),
+            origin_area=content_dict.get("origin_area", "일본"),
         )
 
         try:
+            # create_product() auto-uploads external images to Naver CDN
             result = await create_product(product)
         except Exception as e:
             log.error("naver_publish_failed", listing_id=listing_id, error=str(e))
             return [_failed_event(listing_id, "publish", str(e)[:100])]
 
+        # Naver returns channelProductNo at top level; smartstoreChannelProduct is secondary
         remote_product_id = str(
-            result.get("smartstoreChannelProduct", {}).get("channelProductNo", "")
-            or result.get("channelProductNo", "")
+            result.get("channelProductNo", "")
+            or result.get("smartstoreChannelProduct", {}).get("channelProductNo", "")
+            or result.get("productId", "")
         )
         remote_url = (
             f"https://smartstore.naver.com/{settings.naver_seller_id}/products/{remote_product_id}"

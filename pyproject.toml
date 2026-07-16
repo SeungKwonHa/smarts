@@ -43,6 +43,7 @@ dependencies = [
     "httpx[http2]>=0.27",
     "tenacity>=8.3",
     "python-jose[cryptography]>=3.3",  # PII encryption helpers
+    "bcrypt>=4.1",                     # Naver Commerce API signing
 ]
 
 [project.optional-dependencies]

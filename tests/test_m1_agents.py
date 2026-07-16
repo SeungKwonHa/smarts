@@ -381,12 +381,13 @@ async def test_order_agent_creates_purchase_approval(db_session):
         {"id": listing_id},
     )
 
-    # Create an order
+    # Create an order WITH PCCC (required to proceed past HOLD_PCCC check)
     order_row = await db_session.execute(text("""
         INSERT INTO orders
           (marketplace, remote_order_id, remote_order_item_id,
-           listing_id, qty, unit_sell_krw, status)
-        VALUES ('naver', 'ORD_TEST_001', 'ITEM_TEST_001', :lid, 1, 25000, 'NEW')
+           listing_id, qty, unit_sell_krw, pccc, status)
+        VALUES ('naver', 'ORD_TEST_001', 'ITEM_TEST_001', :lid, 1, 25000,
+                'P1234567890', 'NEW')
         RETURNING id
     """), {"lid": listing_id})
     order_id = order_row.scalar_one()

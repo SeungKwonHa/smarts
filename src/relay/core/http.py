@@ -139,6 +139,25 @@ class HttpClient:
 
         return data
 
+    async def post(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """POST request with rate limiting and JSON response parsing."""
+        domain = _extract_domain(url)
+        await self._rate_wait(domain)
+        log.debug("http_post", url=url[:120])
+        resp = await self._client.post(
+            url, json=json, data=data, params=params, headers=headers or {}
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def post_json(
         self,
         url: str,

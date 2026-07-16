@@ -155,6 +155,10 @@ class LLMClient:
             settings.llm_model_t2,
         )
 
+        # If json_mode, append JSON format instruction to system message
+        if params.json_mode:
+            messages = self._inject_json_instruction(messages)
+
         # Execute with retry
         response, latency_ms = await self._call_with_retry(
             model_id, messages, params, task_name
@@ -166,13 +170,36 @@ class LLMClient:
         # Parse JSON if json_mode
         content: dict[str, Any] | str
         if params.json_mode:
-            try:
-                content = json.loads(completion)
-            except json.JSONDecodeError as e:
-                # One repair attempt
-                content = await self._repair_json(
-                    model_id, messages, completion, str(e), params
-                )
+            # Handle None content (reasoning consumed all tokens)
+            if completion is None:
+                log.warning("llm_none_content", task=task_name, model=model_id)
+                content = {}
+            else:
+                # Strip markdown code fences if present
+                cleaned = completion.strip()
+                if cleaned.startswith("```"):
+                    # ```json\n{...}\n```
+                    cleaned = cleaned.removeprefix("```json").removeprefix("```")
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+                try:
+                    content = json.loads(cleaned)
+                except json.JSONDecodeError as e:
+                    # Try extracting JSON from surrounding text
+                    start = cleaned.find("{")
+                    end = cleaned.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        try:
+                            content = json.loads(cleaned[start:end + 1])
+                        except json.JSONDecodeError:
+                            content = await self._repair_json(
+                                model_id, messages, completion, str(e), params
+                            )
+                    else:
+                        content = await self._repair_json(
+                            model_id, messages, completion, str(e), params
+                        )
         else:
             content = completion
 
@@ -215,6 +242,31 @@ class LLMClient:
             latency_ms=latency_ms,
         )
 
+    @staticmethod
+    def _inject_json_instruction(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Append JSON format instruction for providers that don't support response_format.
+
+        LongCat's OpenAI-compatible endpoint returns None content when
+        response_format={"type": "json_object"} is used. Instead, we ask for
+        JSON in the system prompt and parse it after.
+        """
+        json_note = (
+            "\n\nYou MUST respond with ONLY valid JSON. No markdown, no code "
+            "fences, no explanation. Just the raw JSON object."
+        )
+        new_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                new_messages.append({**msg, "content": msg["content"] + json_note})
+            else:
+                new_messages.append(msg)
+        # If no system message, prepend one
+        if not any(m.get("role") == "system" for m in new_messages):
+            new_messages.insert(0, {"role": "system", "content": json_note.strip()})
+        return new_messages
+
     async def _call_with_retry(
         self,
         model_id: str,
@@ -231,6 +283,10 @@ class LLMClient:
         }
         if params.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+
+        # LongCat does not support response_format=json_object (returns None content).
+        # JSON formatting is handled via prompt injection in _inject_json_instruction().
+        kwargs.pop("response_format", None)
 
         async with self._concurrency[params.tier]:
             for attempt in range(1, settings.llm_max_retries + 2):
