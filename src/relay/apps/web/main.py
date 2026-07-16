@@ -6,22 +6,27 @@ Routes:
   POST /approvals/{id}/approve  → approve an item
   POST /approvals/{id}/deny     → deny an item
   GET  /health          → health check (DB + Redis)
+  GET  /events          → SSE stream of real-time agent activity
   POST /webhooks/naver/orders   → Naver order webhook (future; polls for now)
 """
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from relay.core.config import settings
 from relay.core.db import AsyncSessionLocal, healthcheck as db_health
-from relay.core.events import STREAM_DLQ, _make_redis, setup_consumer_groups
+from relay.core.events import (
+    ALL_STREAMS, STREAM_DLQ, _make_redis, setup_consumer_groups,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -325,6 +330,76 @@ async def bulk_approve(
 
     log.info("bulk_approval_granted", count=len(approved), by=decided_by)
     return JSONResponse({"ok": True, "approved": approved})
+
+
+# ── Real-time Event Stream (SSE) ──────────────────────────────────────────────
+
+@app.get("/events", response_class=FileResponse)
+async def events_page() -> FileResponse:
+    """Real-time agent activity monitor UI (static page + SSE)."""
+    # Static HTML page — JS connects to /events/stream via SSE
+    events_html = Path(__file__).parent / "templates" / "events_static.html"
+    return FileResponse(str(events_html), media_type="text/html")
+
+
+@app.get("/events/stream")
+async def events_stream() -> StreamingResponse:
+    """SSE endpoint: streams real-time events from Redis Streams."""
+
+    async def event_generator():
+        redis = _make_redis()
+        try:
+            # Send initial connected event
+            yield f"event: connected\ndata: {json.dumps({'time': __import__('datetime').datetime.now().isoformat()})}\n\n"
+
+            # Track last-seen ID per stream (start from '0' = read history + new)
+            last_ids = {s: "0" for s in ALL_STREAMS}
+
+            while True:
+                try:
+                    # XREAD from all streams, non-blocking after initial
+                    results = await redis.xread(
+                        streams={s: last_ids[s] for s in ALL_STREAMS},
+                        count=10,
+                        block=1000,
+                    )
+                    if results:
+                        for stream_name, messages in results:
+                            for entry_id, fields in messages:
+                                last_ids[stream_name] = entry_id
+                                raw = fields.get("data", "{}")
+                                try:
+                                    envelope = json.loads(raw)
+                                    stream_short = stream_name.replace("relay:", "")
+                                    yield f"event: {envelope.get('type', 'unknown')}\ndata: {json.dumps({'stream': stream_short, 'entry_id': entry_id, 'envelope': envelope}, default=str)}\n\n"
+                                except json.JSONDecodeError:
+                                    pass
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            await redis.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Workflow Visualization ───────────────────────────────────────────────────
+
+@app.get("/workflow", response_class=FileResponse)
+async def workflow_page() -> FileResponse:
+    """Agent workflow visualization — how pipelines connect end-to-end."""
+    workflow_html = Path(__file__).parent / "templates" / "workflow_static.html"
+    return FileResponse(str(workflow_html), media_type="text/html")
 
 
 def main() -> None:

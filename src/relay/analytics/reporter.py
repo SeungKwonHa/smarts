@@ -27,12 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from relay.core.agent import BaseAgent
 from relay.core.events import STREAM_ANALYTICS
+from relay.core.llm.client import client as llm
 
 log = structlog.get_logger(__name__)
 
 
 class ReporterAgent(BaseAgent):
-    """A3 — generates daily digest from SQL aggregates."""
+    """A3 — generates daily digest + weekly narrative from SQL aggregates."""
 
     name = "reporter"
 
@@ -41,24 +42,164 @@ class ReporterAgent(BaseAgent):
         event: dict[str, Any],
         session: AsyncSession,
     ) -> list[dict[str, Any]]:
-        if event.get("type") != "tick.daily_report":
-            return []
+        event_type = event.get("type", "")
 
-        report_date = date.today() - timedelta(days=1)  # yesterday's data
-        report = await self._build_report(report_date, session)
-        self._emit_report(report, report_date)
+        if event_type == "tick.daily_report":
+            report_date = date.today() - timedelta(days=1)  # yesterday's data
+            report = await self._build_report(report_date, session)
+            self._emit_report(report, report_date)
+
+            return [
+                {
+                    "stream": STREAM_ANALYTICS,
+                    "type": "report.daily_ready",
+                    "idempotency_key": f"report:daily:{report_date.isoformat()}",
+                    "payload": {
+                        "date": report_date.isoformat(),
+                        "summary_ref": f"report:daily:{report_date.isoformat()}",
+                    },
+                }
+            ]
+
+        if event_type == "tick.weekly_narrative":
+            return await self._weekly_narrative(session)
+
+        return []
+
+    async def _weekly_narrative(self, session: AsyncSession) -> list[dict[str, Any]]:
+        """Generate a T1 LLM narrative over the weekly report tables.
+
+        Numbers are computed in SQL; LLM writes prose only.
+        """
+        report_date = date.today() - timedelta(days=1)
+        daily = await self._build_report(report_date, session)
+
+        # Build 7-day trend summary
+        row = await session.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status NOT IN ('CANCELLED', 'HOLD_STOCKOUT', 'SETTLED')) AS open_orders,
+              COUNT(*) FILTER (WHERE created_at > now() - INTERVAL '7 days') AS orders_7d,
+              COALESCE(SUM(qty * unit_sell_krw) FILTER (WHERE created_at > now() - INTERVAL '7 days'), 0) AS revenue_7d,
+              COUNT(*) FILTER (WHERE status = 'CANCELLED' AND created_at > now() - INTERVAL '7 days') AS cancels_7d,
+              (SELECT COUNT(*) FROM listings WHERE status = 'LIVE') AS live_listings
+            FROM orders
+        """))
+        rec = row.first()
+        weekly_stats = {
+            "open_orders": int(rec[0]) if rec else 0,
+            "orders_7d": int(rec[1]) if rec else 0,
+            "revenue_7d_krw": int(rec[2]) if rec else 0,
+            "cancels_7d": int(rec[3]) if rec else 0,
+            "live_listings": int(rec[4]) if rec else 0,
+        }
+
+        # Generate narrative via T1 LLM
+        narrative = await self._generate_narrative(daily, weekly_stats, session)
+
+        log.info(
+            "weekly_narrative_generated",
+            date=report_date.isoformat(),
+            orders_7d=weekly_stats["orders_7d"],
+            revenue_7d=weekly_stats["revenue_7d_krw"],
+        )
 
         return [
             {
                 "stream": STREAM_ANALYTICS,
-                "type": "report.daily_ready",
-                "idempotency_key": f"report:daily:{report_date.isoformat()}",
+                "type": "report.weekly_ready",
+                "idempotency_key": f"report:weekly:{report_date.isoformat()}",
                 "payload": {
                     "date": report_date.isoformat(),
-                    "summary_ref": f"report:daily:{report_date.isoformat()}",
+                    "narrative": narrative,
+                    "stats": weekly_stats,
                 },
             }
         ]
+
+    async def _generate_narrative(
+        self,
+        daily: dict[str, Any],
+        weekly_stats: dict[str, Any],
+        session: AsyncSession,
+    ) -> str:
+        """Generate T1 LLM prose narrative over report tables."""
+        from relay.core.config import settings as cfg
+        if not cfg.llm_configured or cfg.relay_dry_run:
+            return self._template_narrative(daily, weekly_stats)
+
+        prompt = (
+            f"주간 리포트 (일자: {daily.get('date', '')})\n\n"
+            f"📦 상품 현황\n"
+            f"- LIVE 리스팅: {weekly_stats['live_listings']}개\n"
+            f"- 신규(DRAFT): {daily.get('listings', {}).get('draft', 0)}개\n"
+            f"- 일시중단: {daily.get('listings', {}).get('suspended', 0)}개\n\n"
+            f"📊 주문 현황 (최근 7일)\n"
+            f"- 주문 수: {weekly_stats['orders_7d']}건\n"
+            f"- 매출: {weekly_stats['revenue_7d_krw']:,}원\n"
+            f"- 취소: {weekly_stats['cancels_7d']}건\n"
+            f"- 진행 중: {weekly_stats['open_orders']}건\n\n"
+            f"💰 손익\n"
+            f"- 일일 매출: {daily.get('pnl', {}).get('gross_revenue_krw', 0):,}원\n"
+            f"- 일일 마진: {daily.get('pnl', {}).get('est_margin_krw', 0):,}원\n\n"
+            f"⚠️ 알림\n"
+            f"- 재고 지연: {daily.get('stock_sla', {}).get('stale_live_sources', 0)}건\n"
+            f"- PCCC 대기: {daily.get('holds', {}).get('hold_pccc', 0)}건\n"
+            f"- 승인 대기: {daily.get('approvals', {}).get('total', 0)}건\n\n"
+            f"위 수치를 바탕으로 운영자에게 전달할 간결한 주간 브리핑을 한국어로 작성하세요. "
+            f"수치 중심으로 3-5문장, 각 항목별 핵심만 전달하세요."
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "당신은 이커머스 운영 분석가입니다. "
+                    "수치 데이터를 바탕으로 간결하고 실행 가능한 주간 브리핑을 작성하세요."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            resp = await llm.complete(
+                task_name="a3.weekly_narrative",
+                messages=messages,
+                session=session,
+                agent=self.name,
+            )
+            raw = resp.content
+            if isinstance(raw, dict) and "_dry_run" in raw:
+                return self._template_narrative(daily, weekly_stats)
+            if isinstance(raw, str):
+                return raw
+            return raw.get("narrative", self._template_narrative(daily, weekly_stats))
+        except Exception as e:
+            log.warning("weekly_narrative_error", error=str(e))
+            return self._template_narrative(daily, weekly_stats)
+
+    def _template_narrative(
+        self, daily: dict[str, Any], weekly_stats: dict[str, Any]
+    ) -> str:
+        """Template-based weekly narrative (DRY_RUN fallback)."""
+        orders_7d = weekly_stats["orders_7d"]
+        revenue = weekly_stats["revenue_7d_krw"]
+        cancels = weekly_stats["cancels_7d"]
+        live = weekly_stats["live_listings"]
+        stale = daily.get("stock_sla", {}).get("stale_live_sources", 0)
+        pccc = daily.get("holds", {}).get("hold_pccc", 0)
+
+        parts = [
+            f"📊 주간 요약: 최근 7일간 {orders_7d}건의 주문이 있었으며, 총 매출은 {revenue:,}원입니다.",
+        ]
+        if cancels > 0:
+            parts.append(f"취소는 {cancels}건 발생했습니다.")
+        parts.append(f"현재 LIVE 리스팅은 {live}개입니다.")
+        if stale > 0:
+            parts.append(f"⚠️ 재고 데이터가 {stale}건 지연되고 있어 점검이 필요합니다.")
+        if pccc > 0:
+            parts.append(f"PCCC 대기 주문이 {pccc}건 있습니다.")
+
+        return " ".join(parts)
 
     async def _build_report(self, report_date: date, session: AsyncSession) -> dict[str, Any]:
         """Run all report SQL queries."""
@@ -76,6 +217,10 @@ class ReporterAgent(BaseAgent):
         approval_backlog = await self._approval_backlog(session)
         # StockMonitor SLA
         stale = await self._stale_sources(session)
+        # Order holds (PCCC, stockout)
+        holds = await self._order_hold_counts(session)
+        # Open inquiries
+        inquiries = await self._inquiry_counts(session)
 
         return {
             "date": report_date.isoformat(),
@@ -86,6 +231,8 @@ class ReporterAgent(BaseAgent):
             "llm": llm_cost,
             "approvals": approval_backlog,
             "stock_sla": stale,
+            "holds": holds,
+            "inquiries": inquiries,
         }
 
     async def _listing_funnel(self, session: AsyncSession) -> dict[str, int]:
@@ -106,6 +253,32 @@ class ReporterAgent(BaseAgent):
             return {}
         cols = ["draft", "content_ready", "pending_publish", "live", "suspended", "retired", "failed"]
         return dict(zip(cols, rec))
+
+    async def _order_hold_counts(self, session: AsyncSession) -> dict[str, int]:
+        """Count orders in HOLD states (PCCC, STOCKOUT)."""
+        row = await session.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status = 'HOLD_PCCC') AS hold_pccc,
+              COUNT(*) FILTER (WHERE status = 'HOLD_STOCKOUT') AS hold_stockout
+            FROM orders
+        """))
+        rec = row.first()
+        if rec is None:
+            return {"hold_pccc": 0, "hold_stockout": 0}
+        return {"hold_pccc": rec[0], "hold_stockout": rec[1]}
+
+    async def _inquiry_counts(self, session: AsyncSession) -> dict[str, int]:
+        """Count open inquiries."""
+        row = await session.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status = 'OPEN') AS open,
+              COUNT(*) FILTER (WHERE status = 'ESCALATED') AS escalated
+            FROM inquiries
+        """))
+        rec = row.first()
+        if rec is None:
+            return {"open": 0, "escalated": 0}
+        return {"open": rec[0], "escalated": rec[1]}
 
     async def _order_funnel(self, report_date: date, session: AsyncSession) -> dict[str, Any]:
         row = await session.execute(
@@ -266,4 +439,10 @@ class ReporterAgent(BaseAgent):
             approval_backlog=report.get("approvals", {}).get("total", 0),
             # Stock SLA
             stale_sources=report.get("stock_sla", {}).get("stale_live_sources", 0),
+            # Holds
+            hold_pccc=report.get("holds", {}).get("hold_pccc", 0),
+            hold_stockout=report.get("holds", {}).get("hold_stockout", 0),
+            # Inquiries
+            inquiries_open=report.get("inquiries", {}).get("open", 0),
+            inquiries_escalated=report.get("inquiries", {}).get("escalated", 0),
         )

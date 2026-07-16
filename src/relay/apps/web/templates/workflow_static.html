@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RELAY — Agent Workflow</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    nav { background: #1e293b; border-bottom: 1px solid #334155;
+          padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 2rem; }
+    nav .logo { font-weight: 700; font-size: 1.1rem; color: #38bdf8; letter-spacing: 0.05em; }
+    nav a { color: #94a3b8; text-decoration: none; font-size: 0.875rem; }
+    nav a:hover, nav a.active { color: #e2e8f0; }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { color: #64748b; margin-bottom: 24px; font-size: 0.9rem; }
+
+    /* Pipeline sections */
+    .pipeline { margin-bottom: 36px; }
+    .pipeline-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .pipeline-title { font-size: 1.1rem; font-weight: 700; }
+    .pipeline-badge { padding: 2px 10px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
+    .badge-green { background: #166534; color: #bbf7d0; }
+    .badge-blue { background: #1e40af; color: #bfdbfe; }
+    .badge-purple { background: #581c87; color: #e9d5ff; }
+    .badge-orange { background: #9a3412; color: #fed7aa; }
+    .badge-cyan { background: #155e75; color: #a5f3fc; }
+
+    /* Flow diagram */
+    .flow { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 8px 0; }
+    .stage { flex-shrink: 0; width: 220px; }
+    .stage-card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+      padding: 16px; height: 100%; position: relative;
+    }
+    .stage-card.trigger { border-color: #6a9955; background: #1a2a1e; }
+    .stage-card.agent { border-color: #569cd6; background: #1a2030; }
+    .stage-card.hitl { border-color: #dcdcaa; background: #2a2a1e; }
+    .stage-card.external { border-color: #c586c0; background: #2a1a2a; }
+    .stage-card.state { border-color: #4ec9b0; background: #1a2a2a; }
+
+    .stage-icon { font-size: 1.5rem; margin-bottom: 6px; }
+    .stage-name { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+    .stage-agent { font-size: 0.7rem; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stage-desc { font-size: 0.78rem; color: #94a3b8; line-height: 1.4; margin-bottom: 10px; }
+
+    .stage-events { font-size: 0.7rem; }
+    .event-tag { display: inline-block; padding: 2px 6px; margin: 2px 2px 0 0;
+                 border-radius: 4px; font-size: 0.65rem; font-family: monospace; }
+    .evt-in { background: #1e3a5f; color: #93c5fd; }
+    .evt-out { background: #1e4620; color: #86efac; }
+    .evt-hitl { background: #4a3a1e; color: #fde68a; }
+
+    /* Connector between stages */
+    .connector { display: flex; align-items: center; justify-content: center;
+                flex-shrink: 0; width: 50px; position: relative; }
+    .connector-line { width: 100%; height: 2px; background: #334155; position: relative; }
+    .connector-line::after { content: ''; position: absolute; right: -1px; top: -4px;
+                             border: 5px solid transparent; border-left: 6px solid #334155; }
+    .connector.active .connector-line { background: #38bdf8; }
+    .connector.active .connector-line::after { border-left-color: #38bdf8; }
+
+    /* Legend */
+    .legend { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #94a3b8; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* Live indicator */
+    .live-indicator { display: flex; align-items: center; gap: 6px; margin-bottom: 20px; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+                animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .live-text { font-size: 0.78rem; color: #22c55e; }
+
+    /* State table */
+    .state-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
+    .state-table th { text-align: left; padding: 6px 10px; color: #64748b;
+                      font-size: 0.7rem; text-transform: uppercase; border-bottom: 1px solid #334155; }
+    .state-table td { padding: 6px 10px; border-bottom: 1px solid #1e293b; color: #94a3b8; }
+    .state-table td:first-child { font-family: monospace; color: #569cd6; }
+
+    /* Dynamic highlighting */
+    .highlight { animation: flash 1.5s ease-out; }
+    @keyframes flash { 0% { box-shadow: 0 0 0 2px #38bdf8; } 100% { box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">RELAY</span>
+    <a href="/">Dashboard</a>
+    <a href="/approvals">Approvals</a>
+    <a href="/events">Live Events</a>
+    <a href="/workflow" class="active">Workflow</a>
+  </nav>
+
+  <div class="container">
+    <h1>Agent Workflow</h1>
+    <p class="subtitle">RELAY's 5 agent teams, 15 agents, event-driven orchestration</p>
+
+    <div class="live-indicator">
+      <div class="live-dot"></div>
+      <span class="live-text">System operational — 11 scheduled jobs running</span>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#6a9955"></div>Trigger (scheduler/tick)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#569cd6"></div>Agent (processes event)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#dcdcaa"></div>HITL (human approval needed)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#c586c0"></div>External (API call)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#4ec9b0"></div>Postgres state</div>
+    </div>
+
+    <!-- ═══ PIPELINE 1: SOURCING ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Pipeline 1: Sourcing</span>
+        <span class="pipeline-badge badge-green">Intelligence</span>
+        <span style="font-size:0.78rem;color:#64748b">Rakuten/JP bestsellers → product candidates</span>
+      </div>
+      <div class="flow">
+        <div class="stage">
+          <div class="stage-card trigger">
+            <div class="stage-icon">⏰</div>
+            <div class="stage-name">tick.longtail_expand</div>
+            <div class="stage-agent">Scheduler (daily 04:00 KST)</div>
+            <div class="stage-desc">Triggers category sweep of Rakuten bestsellers across 4 genres: kitchen, stationery, hobby, camping</div>
+            <div class="stage-events">
+              <span class="event-tag evt-out">tick.longtail_expand</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">🔍</div>
+            <div class="stage-name">SourceMatcher (L1)</div>
+            <div class="stage-agent">Listing Team</div>
+            <div class="stage-desc">Fetches 30 items/category from Rakuten ranking API. Dedup by (marketplace, url). LLM T0 normalizes: brand, category, attributes.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">tick.longtail_expand</span>
+              <span class="event-tag evt-out">product.sourced</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">🛡️</div>
+            <div class="stage-name">RiskFilter (I3)</div>
+            <div class="stage-agent">Intelligence Team</div>
+            <div class="stage-desc">Rule screen (blocked brands, KC cert, regulated) + LLM T1 IP/trademark screen. Fails closed: any error = reject.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">product.sourced</span>
+              <span class="event-tag evt-out">candidate.cleared</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card state">
+            <div class="stage-icon">📦</div>
+            <div class="stage-name">products + product_sources</div>
+            <div class="stage-agent">Postgres</div>
+            <div class="stage-desc">Canonical product record + Rakuten source (price, stock, seller). Unique on (marketplace, url).</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">INSERT/UPDATE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PIPELINE 2: LISTING ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Pipeline 2: Listing</span>
+        <span class="pipeline-badge badge-blue">Listing Team</span>
+        <span style="font-size:0.78rem;color:#64748b">sourced product → LIVE on Naver</span>
+      </div>
+      <div class="flow">
+        <div class="stage">
+          <div class="stage-card trigger">
+            <div class="stage-icon">📨</div>
+            <div class="stage-name">product.sourced</div>
+            <div class="stage-agent">Event (from Pipeline 1)</div>
+            <div class="stage-desc">New product ready for pricing → content → publish pipeline</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">product.sourced</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">💰</div>
+            <div class="stage-name">PricingAgent (L2)</div>
+            <div class="stage-agent">Listing Team</div>
+            <div class="stage-desc">FX rate + 3% buffer. Cost = source price + shipping + margin. Auto-pricing if margin > 30%, else HITL review.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">product.sourced</span>
+              <span class="event-tag evt-out">listing.priced</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">✍️</div>
+            <div class="stage-name">ContentAgent (L3)</div>
+            <div class="stage-agent">Listing Team</div>
+            <div class="stage-desc">LLM T1 generates: SEO title (40 chars), detail description, image overlay check. Korean marketplace optimization.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">listing.priced</span>
+              <span class="event-tag evt-out">listing.content_ready</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card hitl">
+            <div class="stage-icon">👤</div>
+            <div class="stage-name">Approval Queue</div>
+            <div class="stage-agent">HITL (operator review)</div>
+            <div class="stage-desc">Every publish requires human approval in M1. Title, price, images shown for review. Bulk approve/deny.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">listing.content_ready</span>
+              <span class="event-tag evt-hitl">approval.granted</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card external">
+            <div class="stage-icon">🚀</div>
+            <div class="stage-name">PublishAgent (L4)</div>
+            <div class="stage-agent">Listing Team + Naver API</div>
+            <div class="stage-desc">Calls Naver Commerce API: create product. Status → LIVE. Generates export CSV as fallback.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">approval.granted</span>
+              <span class="event-tag evt-out">listing.live</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card state">
+            <div class="stage-icon">🏪</div>
+            <div class="stage-name">Naver SmartStore</div>
+            <div class="stage-agent">External Marketplace</div>
+            <div class="stage-desc">LIVE listing visible to Korean buyers. Product page with title, images, description, price.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">status: LIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PIPELINE 3: ORDER ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Pipeline 3: Order Fulfillment</span>
+        <span class="pipeline-badge badge-orange">Operations</span>
+        <span style="font-size:0.78rem;color:#64748b">customer buys → order → buy from JP → ship to KR</span>
+      </div>
+      <div class="flow">
+        <div class="stage">
+          <div class="stage-card trigger">
+            <div class="stage-icon">🛒</div>
+            <div class="stage-name">order.created</div>
+            <div class="stage-agent">Naver webhook (tick.order_poll)</div>
+            <div class="stage-desc">Customer purchases on Naver. Order webhook fires with product + shipping details.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">order.created</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">📋</div>
+            <div class="stage-name">OrderAgent (O1)</div>
+            <div class="stage-agent">Operations Team</div>
+            <div class="stage-desc">Validates stock/price freshness. If stale (>36h), triggers StockMonitor refresh. Locks order for purchase.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">order.created</span>
+              <span class="event-tag evt-out">order.validated</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card hitl">
+            <div class="stage-icon">💳</div>
+            <div class="stage-name">Purchase Approval</div>
+            <div class="stage-agent">HITL (approve payment)</div>
+            <div class="stage-desc">Operator confirms purchase: source price, shipping cost, forwarder selection. M1: all purchases HITL.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">order.validated</span>
+              <span class="event-tag evt-hitl">purchase.approved</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card external">
+            <div class="stage-icon">🇯🇵</div>
+            <div class="stage-name">Buy from Source</div>
+            <div class="stage-agent">Rakuten/Amazon JP</div>
+            <div class="stage-desc">Zero-inventory purchase: buy from JP marketplace with forwarder warehouse address as shipping dest.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">purchase_pay</span>
+              <span class="event-tag evt-out">purchase.done</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">📦</div>
+            <div class="stage-name">LogisticsAgent (O2)</div>
+            <div class="stage-agent">Operations Team</div>
+            <div class="stage-desc">발송처리: marks shipment on Naver when forwarder confirms receipt → ships to KR customer.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">purchase.done</span>
+              <span class="event-tag evt-out">order.shipped</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card state">
+            <div class="stage-icon">📱</div>
+            <div class="stage-name">LogisticsTracker</div>
+            <div class="stage-agent">FSM + tracking_poll</div>
+            <div class="stage-desc">4 states: 준비 → 발송 → 통관 → 배달. Alerts on stuck shipments (>72h no update).</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">tick.tracking_poll</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PIPELINE 4: STOCK MONITOR ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Pipeline 4: Stock &amp; Price Monitor</span>
+        <span class="pipeline-badge badge-cyan">Operations (continuous)</span>
+        <span style="font-size:0.78rem;color:#64748b">price/stock staleness → suspend / reactivate / reprice</span>
+      </div>
+      <div class="flow">
+        <div class="stage">
+          <div class="stage-card trigger">
+            <div class="stage-icon">⏰</div>
+            <div class="stage-name">tick.stock_scan</div>
+            <div class="stage-agent">Scheduler (6h interval)</div>
+            <div class="stage-desc">Full sweep of all source URLs. Checks current price + availability on Rakuten/Amazon JP.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-out">tick.stock_scan</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">🔄</div>
+            <div class="stage-name">StockMonitor (O3)</div>
+            <div class="stage-agent">Operations Team</div>
+            <div class="stage-desc">Compares fresh vs stored price/stock. 3 actions: OOS → suspend listing, restock → reactivate, price drift → alert.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">tick.stock_scan</span>
+              <span class="event-tag evt-out">listing.suspended</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card state">
+            <div class="stage-icon">⚠️</div>
+            <div class="stage-name">Stock SLA</div>
+            <div class="stage-agent">Alert if stale &gt;36h</div>
+            <div class="stage-desc">"Stale stock data is the #1 business-killing failure mode in zero-inventory" — CLAUDE.md</div>
+            <div class="stage-events">
+              <span class="event-tag evt-out">stock.stale_alert</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PIPELINE 5: CUSTOMER SERVICE ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Pipeline 5: Customer Service</span>
+        <span class="pipeline-badge badge-purple">CS Team</span>
+        <span style="font-size:0.78rem;color:#64748b">inquiry/claim → classify → reply/triage</span>
+      </div>
+      <div class="flow">
+        <div class="stage">
+          <div class="stage-card trigger">
+            <div class="stage-icon">📨</div>
+            <div class="stage-name">tick.inquiry_poll</div>
+            <div class="stage-agent">Scheduler (10m interval)</div>
+            <div class="stage-desc">Polls Naver SmartStore for new customer inquiries and claims.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-out">tick.inquiry_poll</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">🏷️</div>
+            <div class="stage-name">InquiryAgent (C1)</div>
+            <div class="stage-agent">CS Team</div>
+            <div class="stage-desc">LLM T0 classifies: shipping question, product info, return request. Generates draft reply for operator review.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">tick.inquiry_poll</span>
+              <span class="event-tag evt-out">inquiry.classified</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card agent">
+            <div class="stage-icon">⚖️</div>
+            <div class="stage-name">ClaimTriage (C2)</div>
+            <div class="stage-agent">CS Team (LLM T2)</div>
+            <div class="stage-desc">For claims/refunds: LLM T2 reasoning model assesses claim validity, refund amount, escalation path.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-in">claim.received</span>
+              <span class="event-tag evt-out">claim.triaged</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector"><div class="connector-line"></div></div>
+        <div class="stage">
+          <div class="stage-card hitl">
+            <div class="stage-icon">✉️</div>
+            <div class="stage-name">Send Reply</div>
+            <div class="stage-agent">HITL or auto-reply</div>
+            <div class="stage-desc">Operator approves/replies to customer via Naver SmartStore.</div>
+            <div class="stage-events">
+              <span class="event-tag evt-out">inquiry.replied</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ DATA MODEL TABLE ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">State Transitions (Postgres)</span>
+        <span style="font-size:0.78rem;color:#64748b">All agent state lives in Postgres — agents are stateless</span>
+      </div>
+      <table class="state-table">
+        <thead>
+          <tr><th>Table</th><th>Key States</th><th>Who Writes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>products</td><td>ACTIVE → SUSPENDED → DELETED</td><td>SourceMatcher, StockMonitor</td></tr>
+          <tr><td>product_sources</td><td>IN_STOCK / OOS, price, last_checked_at</td><td>StockMonitor</td></tr>
+          <tr><td>listings</td><td>DRAFT → PENDING_APPROVAL → LIVE → SUSPENDED</td><td>ContentAgent, PublishAgent</td></tr>
+          <tr><td>orders</td><td>CREATED → VALIDATED → PURCHASED → SHIPPED → DELIVERED</td><td>OrderAgent, LogisticsAgent</td></tr>
+          <tr><td>approval_requests</td><td>PENDING → APPROVED / DENIED / EXPIRED</td><td>All agents, operator UI</td></tr>
+          <tr><td>event_outbox</td><td>published: false → true (outbox relay)</td><td>All agents</td></tr>
+          <tr><td>llm_calls</td><td>audit: agent, task, tokens, latency</td><td>LLMClient (every call)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ═══ EVENT BUS ═══ -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="pipeline-title">Event Bus — Redis Streams</span>
+        <span style="font-size:0.78rem;color:#64748b">8 streams connecting all agents</span>
+      </div>
+      <table class="state-table">
+        <thead>
+          <tr><th>Stream</th><th>Producers</th><th>Consumers</th><th>Key Events</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>relay:ticks</td><td>Scheduler</td><td>All agents</td><td>tick.fx_refresh, tick.stock_scan, tick.order_poll...</td></tr>
+          <tr><td>relay:intel</td><td>TrendScout, RiskFilter</td><td>SourceMatcher, RiskFilter</td><td>candidate.cleared, product.sourced</td></tr>
+          <tr><td>relay:listing</td><td>SourceMatcher, PricingAgent</td><td>ContentAgent, PublishAgent</td><td>product.sourced, listing.content_ready, listing.live</td></tr>
+          <tr><td>relay:ops</td><td>OrderAgent, StockMonitor</td><td>LogisticsAgent, StockMonitor</td><td>order.created, listing.suspended</td></tr>
+          <tr><td>relay:cs</td><td>InquiryAgent</td><td>ClaimTriage</td><td>inquiry.classified, claim.triaged</td></tr>
+          <tr><td>relay:analytics</td><td>Trading signal</td><td>Reporter, PromotionAgent</td><td>listing.live, order.created</td></tr>
+          <tr><td>relay:approvals</td><td>Approval Queue UI</td><td>OrderAgent, PublishAgent</td><td>approval.granted, approval.denied</td></tr>
+          <tr><td>relay:dlq</td><td>OutboxRelay (retry &gt;3)</td><td>Dashboard (alert)</td><td>dlq.failed (operator action required)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+// Simulate active flow animation on connectors
+setInterval(function() {
+    var connectors = document.querySelectorAll('.connector');
+    connectors.forEach(function(c) { c.classList.remove('active'); });
+    var idx = Math.floor(Math.random() * connectors.length);
+    if (connectors[idx]) connectors[idx].classList.add('active');
+}, 1500);
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RELAY — Live Events</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    nav { background: #1e293b; border-bottom: 1px solid #334155;
+          padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 2rem; }
+    nav .logo { font-weight: 700; font-size: 1.1rem; color: #38bdf8; letter-spacing: 0.05em; }
+    nav a { color: #94a3b8; text-decoration: none; font-size: 0.875rem; }
+    nav a:hover, nav a.active { color: #e2e8f0; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; color: #f1f5f9; }
+    .subtitle { color: #64748b; margin-top: 0; margin-bottom: 16px; font-size: 0.9rem; }
+    .controls { margin: 16px 0; display: flex; gap: 8px; align-items: center; }
+    .btn { padding: 6px 14px; border: 1px solid #475569; border-radius: 6px;
+           cursor: pointer; font-size: 13px; background: #1e293b; color: #e2e8f0; }
+    .btn:hover { background: #334155; }
+    .status { padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+    .status.connected { background: #166534; color: #bbf7d0; }
+    .status.disconnected { background: #7f1d1d; color: #fecaca; }
+    .status.paused { background: #854d0e; color: #fef08a; }
+    .count { font-size: 12px; color: #888; margin-left: auto; }
+    .filters { margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+    .filters strong { color: #94a3b8; }
+    .filter-tag { padding: 3px 10px; background: #1e293b; border: 1px solid #334155;
+                  border-radius: 12px; cursor: pointer; user-select: none; }
+    .filter-tag input { vertical-align: middle; margin-right: 4px; }
+    .event-log {
+        border: 1px solid #334155; border-radius: 8px; height: 65vh;
+        overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 12px; background: #0f172a;
+    }
+    .event-item { padding: 6px 12px; border-bottom: 1px solid #1e293b; display: flex; gap: 10px; }
+    .event-item:last-child { border-bottom: none; }
+    .event-time { color: #6a9955; min-width: 85px; flex-shrink: 0; }
+    .event-stream { min-width: 85px; font-weight: 600; flex-shrink: 0; }
+    .event-type { color: #dcdcaa; min-width: 170px; flex-shrink: 0; }
+    .event-payload { color: #94a3b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .event-item:hover .event-payload { white-space: normal; word-break: break-all; }
+    .event-item:hover { background: #1e293b; }
+    .stream-ticks .event-stream { color: #6a9955; }
+    .stream-intel .event-stream { color: #c586c0; }
+    .stream-listing .event-stream { color: #569cd6; }
+    .stream-ops .event-stream { color: #dcdcaa; }
+    .stream-cs .event-stream { color: #4ec9b0; }
+    .stream-analytics .event-stream { color: #9bcbfe; }
+    .stream-approvals .event-stream { color: #f97583; }
+    .stream-dlq .event-stream { color: #ff6b6b; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">RELAY</span>
+    <a href="/">Dashboard</a>
+    <a href="/approvals">Approvals</a>
+    <a href="/events" class="active">Live Events</a>
+  </nav>
+
+  <div class="container">
+    <h1>Live Agent Activity</h1>
+    <p class="subtitle">Real-time event stream from Redis Streams (SSE)</p>
+
+    <div class="controls">
+      <button id="btn-pause" class="btn" onclick="togglePause()">Pause</button>
+      <button id="btn-clear" class="btn" onclick="clearEvents()">Clear</button>
+      <span id="status" class="status connected">Connected</span>
+      <span id="count" class="count">0 events</span>
+    </div>
+
+    <div class="filters" id="filters"></div>
+
+    <div id="event-log" class="event-log"></div>
+  </div>
+
+<script>
+var STREAMS = ["ticks", "intel", "listing", "ops", "cs", "analytics", "approvals", "dlq"];
+var evtSource = null;
+var paused = false;
+var eventCount = 0;
+var activeFilters = {};
+
+function initFilters() {
+    var f = document.getElementById('filters');
+    var label = document.createElement('strong');
+    label.textContent = 'Streams:';
+    f.appendChild(label);
+    STREAMS.forEach(function(s) {
+        activeFilters[s] = true;
+        var tag = document.createElement('label');
+        tag.className = 'filter-tag';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.addEventListener('change', function() { activeFilters[s] = this.checked; });
+        tag.appendChild(cb);
+        tag.appendChild(document.createTextNode(' ' + s));
+        f.appendChild(tag);
+    });
+}
+
+function togglePause() {
+    paused = !paused;
+    document.getElementById('btn-pause').textContent = paused ? 'Resume' : 'Pause';
+    var st = document.getElementById('status');
+    st.textContent = paused ? 'Paused' : 'Connected';
+    st.className = 'status ' + (paused ? 'paused' : 'connected');
+}
+
+function clearEvents() {
+    document.getElementById('event-log').innerHTML = '';
+    eventCount = 0;
+    document.getElementById('count').textContent = '0 events';
+}
+
+function appendEvent(stream, type, time, payload) {
+    var log = document.getElementById('event-log');
+    var div = document.createElement('div');
+    div.className = 'event-item stream-' + stream;
+    var timeStr = new Date(time).toLocaleTimeString('ko-KR', { hour12: false });
+    var ps = JSON.stringify(payload).substring(0, 200);
+    div.innerHTML = '<span class="event-time">' + timeStr + '</span>'
+        + '<span class="event-stream">' + stream + '</span>'
+        + '<span class="event-type">' + type + '</span>'
+        + '<span class="event-payload" title="' + ps.replace(/"/g, '&quot;') + '">' + ps + '</span>';
+    log.insertBefore(div, log.firstChild);
+    while (log.children.length > 200) log.removeChild(log.lastChild);
+}
+
+function connect() {
+    evtSource = new EventSource('/events/stream');
+    evtSource.onopen = function() {
+        document.getElementById('status').textContent = 'Connected';
+        document.getElementById('status').className = 'status connected';
+    };
+    evtSource.onerror = function() {
+        document.getElementById('status').textContent = 'Disconnected';
+        document.getElementById('status').className = 'status disconnected';
+    };
+    evtSource.onmessage = function(e) {
+        if (paused) return;
+        try {
+            var w = JSON.parse(e.data);
+            var stream = w.stream || 'unknown';
+            var env = w.envelope || {};
+            if (!activeFilters[stream]) return;
+            appendEvent(stream, env.type || 'unknown', env.occurred_at || new Date().toISOString(), env.payload || {});
+            eventCount++;
+            document.getElementById('count').textContent = eventCount + ' events';
+        } catch(err) {}
+    };
+}
+
+initFilters();
+connect();
+</script>
+</body>
+</html>

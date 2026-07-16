@@ -71,6 +71,8 @@
       <span class="badge">{{ pending_approvals }}</span>
       {% endif %}
     </a>
+    <a href="/workflow" {% if request.url.path == "/workflow" %}class="active"{% endif %}>Workflow</a>
+    <a href="/events" {% if request.url.path == "/events" %}class="active"{% endif %}>Live Events</a>
   </nav>
   <main>
     {% block content %}{% endblock %}
