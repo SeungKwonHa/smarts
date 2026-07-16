@@ -79,8 +79,12 @@ _SYSTEM_PROMPT = (
 
 # SEO / promotional phrases to strip (order matters: greedy first)
 _SEO_PATTERNS = [
-    # Full bracket contents (most aggressive - remove 【...】 entirely)
-    r'【[^】]*】',
+    # Full bracket contents (most aggressive - remove entirely)
+    r'【[^】]*】',       # Japanese promotional brackets
+    r'「[^」]*」',       # Japanese quotation brackets
+    r'\[[^\]]*\]',       # English square brackets
+    r'（[^）]*）',       # Japanese parentheses with content
+    r'\([^)]*\)',        # English parentheses with content
     # Full slash-box contents (＼...／)
     r'＼[^／]*／',
     # Ranking claims
@@ -115,6 +119,10 @@ _SEO_PATTERNS = [
     # Star/asterisk decorations
     r'★[^*]*★',
     r'\*[＊\*][^*]*\*[＊\*]',
+    # Decorative diamonds/triangles
+    r'◆+',
+    r'▲+',
+    r'■+',
     # Media mentions
     r'辻ちゃんネル紹介',
     r'辻ちゃんネル紹介記念[0-9０，,]+円?\s*(off|OFF)?\s*クーポン?',
@@ -148,6 +156,12 @@ _SPEC_PATTERNS = [
     # Generic model patterns (alphanumeric after dash)
     r'\b[A-Z]{2,}-[A-Z0-9]+\b',  # JNL-500, SD-KA500, etc.
     r'\b[A-Z][a-z]+-[0-9]+\b',    # Jnl-500 style
+    # Size notations like 60×80, 60x80, 60*80, 20×
+    r'\b[0-9０]+\s*[×x*]\s*[0-9０]*\b',
+    # Capacity with decimal (0.89L, 0.59L)
+    r'\b[0-9０]+\.[0-9０]+\s*[LlＬ]\b',
+    # Standalone large model numbers (2.0 at end, 0. 0.)
+    r'\b\d+\.\d+\s+\d+\.\d+\b',
 ]
 
 # Brand detection (common Japanese-foreign brands on Rakuten)
@@ -274,6 +288,12 @@ def _apply_rules_to_name(product_name: str) -> str:
     name = name.strip(' /｜-〜~')
     # Remove orphaned empty brackets that may remain
     name = name.replace('【】', '').replace('（）', '').replace('()', '')
+    # Remove orphaned opening brackets with everything after them
+    name = re.sub(r'\s*[\[\[「（][^\]\]」）]*$', '', name)
+    # Remove orphaned closing brackets
+    name = name.strip('[]「」（）()')
+    # Remove orphaned decimal fragments (e.g., "0. 0." from stripped "0.89L 0.59L")
+    name = re.sub(r'\b\d+\.\s+\d+\.\s*\d*\.?\s*\d*', '', name)
     name = re.sub(r'\s+', ' ', name).strip()
     return name[:60]
 
