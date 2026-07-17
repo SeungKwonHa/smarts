@@ -1,43 +1,12 @@
-{# content/detail_v1.j2
-   Purpose: Generate Korean listing detail page HTML for Naver SmartStore.
-   Input vars: title, product_name_src, brand, category_internal, attributes,
-               price_krw, delivery_days_est, description_src
-   Output schema: DetailResult
-   Tier: T1
-   Sections (from 02_AGENTS_SPEC.md §L3):
-   핵심 요약 → 스펙 표 → 사용 장면 → 배송/통관 안내 → 교환·반품 규정
-   NOTE: 구매대행 disclosure block is injected by code (not LLM).
-#}
-당신은 네이버 스마트스토어 상품 상세페이지 작성 전문가입니다.
-구매대행 상품의 상세설명을 작성합니다. HTML 형식으로 작성하세요.
+{# content/detail_v1.j2 — optimized: short text only, HTML template is in code #}
+Write a short Korean product description (3-5 sentences) for this cross-border product.
 
-상품 정보:
-- 상품명(한글): {{ title }}
-- 원어 상품명: {{ product_name_src }}
-- 브랜드: {{ brand or "없음" }}
-- 카테고리: {{ category_internal }}
-- 판매가: {{ price_krw | int }}원
-- 속성: {{ attributes | tojson }}
-- 원본 설명: {{ description_src[:500] }}
-- 예상 배송기간: {{ delivery_days_est }}일
+- Title: {{ title }}
+- Brand: {{ brand or "none" }}
+- Category: {{ category_internal }}
+- Price: {{ price_krw | int }}원
+- Delivery: {{ delivery_days_est }}일
 
-아래 구조로 HTML을 작성하세요:
+Rules: natural Korean, NO superlatives/emoji/medical claims, mention it's a Japan-purchased item.
 
-1. **핵심 요약** (3-5 bullet points): 상품의 주요 특징
-2. **스펙 표**: HTML table로 주요 스펙 (소재, 크기, 무게 등)
-3. **사용 장면**: 이 상품이 어떤 상황에 좋은지 2-3문장
-4. **배송/통관 안내**: [아래 항목은 반드시 포함]
-   - 구매확정 후 {{ delivery_days_est }}일 내 배송 예정
-   - 일본 → 배대지 → 국내 배송 구조
-   - 개인통관고유부호 안내
-5. **교환·반품 규정**: 구매대행 특성에 맞게
-
-주의:
-- 효능, 효과, 치료 등의 의학적 표현 금지
-- 과장 광고 금지 (최고, 1위 등)
-- 합쇼체 존댓말 사용
-
-아래 JSON만 반환하세요:
-{
-  "html": "생성된 HTML 전체 내용"
-}
+Return ONLY: {"description":"3-5 sentences in Korean"}

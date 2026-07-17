@@ -44,15 +44,15 @@ TASK_PARAMS: dict[str, TaskParams] = {
     # Intelligence
     "i1.entity_extract":        TaskParams(Tier.T0, 0.0, 1024, batch_ok=True,  cache_ttl_s=86400),
     "i2.kr_keywords":           TaskParams(Tier.T0, 0.1, 512,  batch_ok=True,  cache_ttl_s=86400),
-    "i3.ip_text_screen":        TaskParams(Tier.T1, 0.0, 1024, vision=True,    cache_ttl_s=3600),
+    "i3.ip_text_screen":        TaskParams(Tier.T1, 0.0, 2048, vision=True,    cache_ttl_s=3600),
     "i3.ip_image_check":        TaskParams(Tier.T1, 0.0, 512,  vision=True,    cache_ttl_s=3600),
     "i4.brand_dossier":         TaskParams(Tier.T2, 0.5, 4096, json_mode=False, cache_ttl_s=0),
     "i4.outreach_draft":        TaskParams(Tier.T2, 0.6, 2048, json_mode=False, cache_ttl_s=0),
     # Listing
     "l1.variant_normalize":     TaskParams(Tier.T0, 0.0, 1024, batch_ok=True,  cache_ttl_s=86400),
     "l1.category_map":          TaskParams(Tier.T0, 0.0, 256,  batch_ok=True,  cache_ttl_s=86400),
-    "l3.title_gen":             TaskParams(Tier.T1, 0.4, 512,                  cache_ttl_s=0),
-    "l3.detail_gen":            TaskParams(Tier.T1, 0.5, 2048,                 cache_ttl_s=0),
+    "l3.title_gen":             TaskParams(Tier.T1, 0.4, 2048,                 cache_ttl_s=0),
+    "l3.detail_gen":            TaskParams(Tier.T1, 0.5, 4096,                 cache_ttl_s=0),
     "l3.image_overlay_check":   TaskParams(Tier.T0, 0.0, 256,  vision=True,    cache_ttl_s=3600),
     # CS
     "c1.inquiry_classify":      TaskParams(Tier.T0, 0.0, 256,  batch_ok=True,  cache_ttl_s=0),

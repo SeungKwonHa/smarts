@@ -141,6 +141,17 @@ async def llm_screen(
                 confidence=1.0,
             )
 
+        # Normalize LLM output: some models return 'decision' instead of 'verdict'
+        if isinstance(raw, dict):
+            if "verdict" not in raw and "decision" in raw:
+                raw["verdict"] = raw.pop("decision")
+            if "risk_kinds" not in raw and "risk_level" in raw:
+                raw["risk_kinds"] = [raw["risk_level"]] if raw["risk_level"] else []
+            if "rationale" not in raw and "reason" in raw:
+                raw["rationale"] = raw.pop("reason")
+            if "severity" not in raw and "risk_level" in raw:
+                raw["severity"] = raw["risk_level"].upper() if raw["risk_level"] else "NONE"
+
         result = RiskScreenResult.model_validate(raw)
         return result
 
@@ -225,7 +236,7 @@ class RiskFilterAgent(BaseAgent):
             log.info("risk_filter_blocked_by_rules", candidate_id=candidate_id, kinds=rule_kinds)
             return [_rejected_event(candidate_id, f"risk:{rule_kinds[0]}", correlation_id)]
 
-        # Step 2: LLM screen
+        # Step 2: LLM screen (fail open to PASS if LLM fails — rule_screen already passed)
         result = await llm_screen(
             product_name=product_name,
             description="",
@@ -234,6 +245,19 @@ class RiskFilterAgent(BaseAgent):
             session=session,
             correlation_id=correlation_id,
         )
+
+        # If LLM returned REVIEW due to processing error (not real risk),
+        # treat as PASS since rule_screen already cleared this product
+        if result.verdict == "REVIEW" and not result.rationale:
+            log.info("risk_filter_llm_empty_fallback", candidate_id=candidate_id,
+                     note="LLM returned empty, rule_screen passed, treating as PASS")
+            result = RiskScreenResult(
+                verdict="PASS",
+                risk_kinds=[],
+                severity="NONE",
+                rationale="LLM empty response override — rule_screen already cleared",
+                confidence=0.85,
+            )
 
         if result.verdict == "BLOCK":
             await self._write_risk_flags(

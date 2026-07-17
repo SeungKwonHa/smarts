@@ -200,6 +200,17 @@ class LLMClient:
                         content = await self._repair_json(
                             model_id, messages, completion, str(e), params
                         )
+
+            # Handle empty JSON {} — LongCat reasoning model sometimes returns {}
+            # when thinking consumes all tokens. Trigger repair to get real content.
+            if content == {}:
+                log.warning("llm_empty_json", task=task_name, model=model_id)
+                content = await self._repair_json(
+                    model_id, messages,
+                    '{"_empty": true}',
+                    "Empty JSON returned by model",
+                    params,
+                )
         else:
             content = completion
 

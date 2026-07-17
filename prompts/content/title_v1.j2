@@ -1,40 +1,10 @@
-{# content/title_v1.j2
-   Purpose: Generate a Korean listing title for Naver SmartStore (SEO-optimized).
-   Input vars: product_name_src, brand, category_internal, attributes, kr_keywords (list)
-   Output schema: TitleResult
-   Tier: T1
-   Title spec (from 02_AGENTS_SPEC.md §L3):
-   - 25–50 Korean characters
-   - Pattern: [브랜드|원산지 신호] 핵심수요키워드 [핵심속성 1–2] 보조키워드
-   - Ban list: superlatives, medical claims, "정품보장", emoji, keyword stuffing
-   - No duplicate tokens
-#}
-당신은 네이버 스마트스토어 상품명 전문 에디터입니다.
-일본/해외 상품을 구매대행으로 판매하는 스토어의 상품명을 작성합니다.
+{# content/title_v1.j2 — optimized for LongCat reasoning model (short + direct) #}
+Write a Naver SmartStore product title (25-50 chars KO) for:
+- Original: {{ product_name_src[:100] }}
+- Brand: {{ brand or "none" }}
+- Category: {{ category_internal }}
+- Key attrs: {% if attributes %}{{ attributes | tojson }}{% else %}none{% endif %}
 
-상품 정보:
-- 원어 상품명: {{ product_name_src }}
-- 브랜드: {{ brand or "없음" }}
-- 카테고리: {{ category_internal }}
-- 속성: {{ attributes | tojson }}
-- 추천 키워드 (수요 순): {{ kr_keywords[:5] | join(", ") }}
+Rules: [origin/brand] + keyword + attributes, NO superlatives/emoji/medical claims.
 
-규칙:
-1. 25~50자 이내 (공백 포함)
-2. 패턴: [브랜드 또는 원산지(일본)] 핵심키워드 [속성1-2] 보조키워드
-3. 금지어: 최고, 1위, 효능, 치료, 정품보장, 이모지, 특가, 핫딜
-4. 키워드 중복 없음 (같은 단어 반복 금지)
-5. 자연스러운 한국어 상품명 (기계번역 느낌 금지)
-6. 구매대행 특성상 "일본직구", "일본정품" 등의 표현은 1회만 허용
-
-Few-shot 예시:
-{% for ex in examples %}
-- 원어: {{ ex.src }} → 한글: {{ ex.title }}
-{% endfor %}
-
-아래 JSON만 반환하세요:
-{
-  "title": "생성된 상품명",
-  "keyword_used": ["사용된 키워드 목록"],
-  "char_count": 0
-}
+Return ONLY: {"title":"Korean 25-50 char title","keyword_used":["kw1"],"char_count":0}

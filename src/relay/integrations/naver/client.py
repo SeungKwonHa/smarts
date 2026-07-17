@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import bcrypt
+import httpx
 import structlog
 
 from relay.core.config import settings
@@ -247,7 +248,7 @@ async def create_product(product: NaverProduct) -> dict[str, Any]:
         log.info("naver_create_product_dry_run", name=product.name[:40])
         return {"_dry_run": True, "channelProductNo": "DRY_RUN_0"}
 
-    await get_token()
+    token = await get_token()
 
     # Auto-upload images if they're not already Naver CDN urls
     naver_cdn_prefix = "shop-phinf.pstatic.net"
@@ -256,10 +257,19 @@ async def create_product(product: NaverProduct) -> dict[str, Any]:
     ]
     if needs_upload:
         log.info("naver_uploading_images_count", count=len(needs_upload))
-        uploaded = await download_and_upload_images(get_token(), needs_upload)
-        # Replace external URLs with CDN URLs, keep existing CDN URLs
-        cdn_urls = [url for url in product.images if naver_cdn_prefix in url]
-        product.images = cdn_urls + uploaded
+        try:
+            uploaded = await download_and_upload_images(token, needs_upload)
+            # Replace external URLs with CDN URLs, keep existing CDN URLs
+            cdn_urls = [url for url in product.images if naver_cdn_prefix in url]
+            product.images = cdn_urls + uploaded
+        except Exception as e:
+            log.warning("naver_image_upload_failed", error=str(e)[:100])
+            # Continue without images — Naver requires at least 1 image
+            # Use placeholder or skip if upload fails
+            if not any(naver_cdn_prefix in u for u in product.images):
+                raise RuntimeError(
+                    f"Image upload failed and no Naver CDN images available: {e}"
+                ) from e
 
     payload = _build_product_payload(product)
     result = await http_client.post(

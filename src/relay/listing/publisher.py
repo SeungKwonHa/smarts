@@ -161,10 +161,12 @@ class PublishAgent(BaseAgent):
             log.error("naver_publish_failed", listing_id=listing_id, error=str(e))
             return [_failed_event(listing_id, "publish", str(e)[:100])]
 
-        # Naver returns channelProductNo at top level; smartstoreChannelProduct is secondary
+        # Naver returns originProductNo + smartstoreChannelProductNo
         remote_product_id = str(
-            result.get("channelProductNo", "")
-            or result.get("smartstoreChannelProduct", {}).get("channelProductNo", "")
+            result.get("smartstoreChannelProductNo", "")
+            or result.get("originProductNo", "")
+            or result.get("smartstoreChannelProduct", {}).get("smartstoreChannelProductNo", "")
+            or result.get("channelProductNo", "")
             or result.get("productId", "")
         )
         remote_url = (

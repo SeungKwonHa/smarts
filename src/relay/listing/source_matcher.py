@@ -302,8 +302,12 @@ class SourceMatcherAgent(BaseAgent):
                 agent=self.name,
             )
             raw = resp.content
-            if isinstance(raw, dict) and "_dry_run" not in raw:
-                return NormalizedProduct.model_validate(raw)
+            # Handle empty JSON {} — LLM returned nothing useful, use fallback
+            if not raw or not isinstance(raw, dict) or "_dry_run" in raw:
+                raise ValueError("Empty or dry-run response")
+            if "canonical_name_src" not in raw:
+                raise ValueError("Missing canonical_name_src in response")
+            return NormalizedProduct.model_validate(raw)
         except Exception as e:
             log.debug("source_matcher_normalize_error", error=str(e))
 

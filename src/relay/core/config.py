@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     llm_model_t0: str = ""
     llm_model_t1: str = ""
     llm_model_t2: str = ""
-    llm_timeout_s: int = 60
+    llm_timeout_s: int = 120
     llm_max_retries: int = 2
     llm_daily_budget_tokens: int = 30_000_000
 

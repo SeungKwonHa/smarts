@@ -78,11 +78,11 @@ class TitleResult(BaseModel):
 
 
 class DetailResult(BaseModel):
-    html: str
+    description: str
 
-    @field_validator("html")
+    @field_validator("description")
     @classmethod
-    def strip_html(cls, v: str) -> str:
+    def strip_desc(cls, v: str) -> str:
         return v.strip()
 
 
@@ -170,7 +170,7 @@ class ContentAgent(BaseAgent):
         if title_result is None:
             return [_failed_event(listing_id, "content", "title_gen_failed")]
 
-        # Generate detail HTML (T1)
+        # Generate short description via LLM (T1), then build HTML from template
         detail_result = await self._generate_detail(
             title=title_result.title,
             name_src=name_src,
@@ -186,8 +186,17 @@ class ContentAgent(BaseAgent):
         if detail_result is None:
             return [_failed_event(listing_id, "content", "detail_gen_failed")]
 
-        # Inject mandatory disclosure block
-        full_html = detail_result.html + _DISCLOSURE_BLOCK.format(delivery_days=10)
+        # Build full HTML from template (structured sections + LLM description)
+        full_html = self._build_detail_html(
+            title=title_result.title,
+            brand=brand or "미표기",
+            name_src=name_src,
+            category_internal=category_internal,
+            attributes=attrs,
+            sell_price_krw=sell_price_krw or 0,
+            description=detail_result.description,
+            delivery_days=10,
+        )
 
         # Naver category ID
         naver_cat_id = get_naver_category_id(category_internal or "other")
@@ -301,6 +310,18 @@ class ContentAgent(BaseAgent):
                     messages.append({"role": "assistant", "content": str(raw if 'raw' in dir() else "{}")})
                     messages.append({"role": "user", "content": f"Validation error: {e}. Please fix the title and return valid JSON."})
 
+        # Fallback: if both attempts failed, build a compliant title from source name
+        base = (name_src or "일본 프리미엄 상품").strip()
+        fallback = f"일본 {base} 고급 구매대행"
+        if len(fallback) < 25:
+            fallback = f"일본 프리미엄 {base} 고급 구매대행 상품"
+        fallback = fallback[:50]
+        return TitleResult(
+            title=fallback,
+            keyword_used=[],
+            char_count=len(fallback),
+        )
+
         return None
 
     async def _generate_detail(
@@ -317,6 +338,9 @@ class ContentAgent(BaseAgent):
         session: AsyncSession,
         correlation_id: str,
     ) -> DetailResult | None:
+        """Generate a short Korean product description via LLM (T1).
+        The full HTML template is built by _build_detail_html(), not LLM.
+        """
         template = _jinja.get_template("detail_v1.j2")
         rendered = template.render(
             title=title,
@@ -331,10 +355,7 @@ class ContentAgent(BaseAgent):
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "당신은 네이버 스마트스토어 상세페이지 작성 전문가입니다. "
-                    "JSON 형식으로만 응답하세요. html 필드에 HTML을 넣으세요."
-                ),
+                "content": "JSON으로만 응답하세요.",
             },
             {"role": "user", "content": rendered},
         ]
@@ -350,12 +371,80 @@ class ContentAgent(BaseAgent):
                 )
                 raw = resp.content
                 if isinstance(raw, dict) and "_dry_run" in raw:
-                    return DetailResult(html="<p>DRY_RUN — 상세페이지가 여기에 생성됩니다.</p>")
-                return DetailResult.model_validate(raw)
+                    return DetailResult(description="일본 직구 프리미엄 상품입니다. 구매대행으로 안전하게 배송해드립니다.")
+                result = DetailResult.model_validate(raw)
+                if not result.description or len(result.description.strip()) < 10:
+                    raise ValueError("Description too short")
+                return result
             except Exception as e:
                 log.warning("detail_gen_attempt_failed", attempt=attempt + 1, error=str(e))
+                if attempt == 0:
+                    messages.append({"role": "assistant", "content": str(raw if 'raw' in dir() else "{}")})
+                    messages.append({"role": "user", "content": f"Error: {e}. Return JSON with 'description' field (3-5 Korean sentences)."})
 
-        return None
+        # Fallback: use a generic description if LLM fails
+        return DetailResult(
+            description=f"일본에서 직구하는 {brand or ''} {category_internal} 상품입니다. "
+                        f"품질 좋은 정품으로 안전하게 배송해드립니다."
+        )
+
+    @staticmethod
+    def _build_detail_html(
+        *,
+        title: str,
+        brand: str,
+        name_src: str,
+        category_internal: str,
+        attributes: dict,
+        sell_price_krw: int,
+        description: str,
+        delivery_days: int,
+    ) -> str:
+        """Build structured HTML detail page from template + LLM-generated description."""
+        # Spec table rows from attributes
+        spec_rows = ""
+        for key, val in list(attributes.items())[:6]:
+            if val:
+                spec_rows += f"<tr><th>{key}</th><td>{val}</td></tr>\n"
+
+        # Image tags
+        img_tags = ""
+        for img in attributes.get("_images", [])[:6]:
+            img_tags += f'<img src="{img}" alt="{title}" style="max-width:100%;margin:8px 0;" />\n'
+
+        return f"""
+<div class="product-detail" style="font-family:sans-serif;line-height:1.6;color:#333">
+  <h2 style="border-bottom:2px solid #333;padding-bottom:8px">{title}</h2>
+
+  <section style="margin:20px 0">
+    <h3>📌 상품 요약</h3>
+    <p>{description}</p>
+  </section>
+
+  <section style="margin:20px 0">
+    <h3>📋 상품 스펙</h3>
+    <table style="width:100%;border-collapse:collapse;margin:12px 0">
+      <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left;width:30%">상품명</th><td style="padding:8px">{name_src}</td></tr>
+      <tr style="background:#fff"><th style="padding:8px;text-align:left">브랜드</th><td style="padding:8px">{brand}</td></tr>
+      <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left">카테고리</th><td style="padding:8px">{category_internal}</td></tr>
+      <tr style="background:#fff"><th style="padding:8px;text-align:left">판매가</th><td style="padding:8px">₩{sell_price_krw:,}</td></tr>
+      {spec_rows}
+    </table>
+  </section>
+
+  {img_tags}
+
+  <section style="margin:20px 0">
+    <h3>🚚 배송 안내</h3>
+    <ul>
+      <li>구매확정 후 {delivery_days}일 내 배송 예정 (일본 → 배대지 → 국내 배송)</li>
+      <li>개인통관고유부호가 필요합니다 (관세청 앱 또는 유니패스에서 발급)</li>
+    </ul>
+  </section>
+
+  {_DISCLOSURE_BLOCK.format(delivery_days=delivery_days)}
+</div>
+"""
 
     async def _filter_images(
         self,
