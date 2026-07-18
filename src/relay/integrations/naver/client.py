@@ -330,6 +330,20 @@ async def update_product(
     if name is not None:
         origin["name"] = name
 
+    # Original price (소비자 가격) — shows as strikethrough with discount
+    orig_price = updates.get("original_price")
+    if orig_price is not None:
+        origin["consumerPrice"] = orig_price
+        # Auto-calculate discount rate
+        sale = origin.get("salePrice", 0)
+        if sale > 0 and orig_price > sale:
+            origin["discountRate"] = round((1 - sale / orig_price) * 100)
+
+    # Detail HTML (상세페이지 내용)
+    detail = updates.get("detail_html")
+    if detail is not None:
+        origin["detailContent"] = detail
+
     # 3. PUT back the full payload
     payload = {
         "originProduct": origin,
