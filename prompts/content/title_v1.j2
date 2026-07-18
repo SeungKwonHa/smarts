@@ -1,14 +1,29 @@
-{# content/title_v1.j2 — optimized for LongCat reasoning model (short + direct) #}
-Write a Korean Naver SmartStore product title (25-50 KOREAN chars).
-- Original name (for reference ONLY, DO NOT copy): {{ product_name_src[:100] }}
+{# content/title_v1.j2 — Naver SmartStore SEO-optimized title generator #}
+{# Naver SEO formula: [메인키워드] + [속성] + [용도/상황] + [스펙/수량] #}
+Write a Korean Naver SmartStore product title (max 50 KOREAN chars).
+- Original name (reference ONLY): {{ product_name_src[:100] }}
 - Brand: {{ brand or "none" }}
 - Category: {{ category_internal }}
 - Key attrs: {% if attributes %}{{ attributes | tojson }}{% else %}none{% endif %}
 
-RULES:
-- Output MUST be 100% KOREAN characters — NOT Japanese/Chinese
-- Pattern: 일본 + brand(if known) + keyword + attribute
-- NO superlatives/emoji/medical claims
-- Length: 25-50 Korean chars
+SEO RULES (follow strictly):
+1. Put MAIN KEYWORD first (what shoppers actually type: 안는베개, 매트리스커버, 냉감시트, 의자다리커버...)
+2. NEVER use "일본 프리미엄" — nobody searches that. Use "일본 정품" only as trailing trust signal
+3. Include seasonal keywords when relevant (여름, 겨울, 환절기...)
+4. Add specific attributes: material, size, count (4P, 16개, 싱글, 실리콘...)
+5. Use use-case keywords (바닥보호, 소음방지, 목쿠션, 방수...)
+6. Max 50 chars, no emoji, no [ ] ★ ! symbols, no medical claims
+7. Output MUST be 100% Korean (not Japanese/Chinese)
+8. Pattern: 메인키워드 + 속성 + 용도 + 스펙 (NOT "일본 프리미엄 + keyword")
 
-Return ONLY: {"title":"Korean 25-50 char title","keyword_used":["kw1"],"char_count":0}
+GOOD examples:
+- "안는베개 냉감 바디필로우 일본 정품 허그모치 여름 목쿠션"
+- "매트리스커버 방수 보시시츠 일본 정품 싱글 더블 사이즈"
+- "의자다리커버 4P 원형 사각 바닥보호 일본 정품"
+
+BAD examples:
+- "일본 프리미엄 주방용품 구매대행 정품" ← generic, no main keyword
+- "안는베개 일본 안는베개 바디필로우" ← keyword spam
+- "[해외직구] ★ 일본 안는베개 추천!!" ← symbols + spam
+
+Return ONLY: {"title":"Korean title max 50 chars","keyword_used":["main_kw"],"char_count":0}
