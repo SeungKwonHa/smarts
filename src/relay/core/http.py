@@ -172,6 +172,22 @@ class HttpClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def put(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """PUT request with rate limiting and JSON response parsing."""
+        domain = _extract_domain(url)
+        await self._rate_wait(domain)
+        log.debug("http_put", url=url[:120])
+        resp = await self._client.put(url, json=json, data=data, headers=headers or {})
+        resp.raise_for_status()
+        return resp.json()
+
     async def get_html_playwright(self, url: str, *, wait_selector: str = "body") -> str:
         """Fetch a JS-heavy page via Playwright. Expensive — use sparingly."""
         from playwright.async_api import async_playwright

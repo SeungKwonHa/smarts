@@ -326,6 +326,10 @@ async def update_product(
     if stock is not None:
         origin["stockQuantity"] = stock
 
+    name = updates.get("product_name")
+    if name is not None:
+        origin["name"] = name
+
     # 3. PUT back the full payload
     payload = {
         "originProduct": origin,

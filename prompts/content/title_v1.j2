@@ -1,10 +1,14 @@
 {# content/title_v1.j2 — optimized for LongCat reasoning model (short + direct) #}
-Write a Naver SmartStore product title (25-50 chars KO) for:
-- Original: {{ product_name_src[:100] }}
+Write a Korean Naver SmartStore product title (25-50 KOREAN chars).
+- Original name (for reference ONLY, DO NOT copy): {{ product_name_src[:100] }}
 - Brand: {{ brand or "none" }}
 - Category: {{ category_internal }}
 - Key attrs: {% if attributes %}{{ attributes | tojson }}{% else %}none{% endif %}
 
-Rules: [origin/brand] + keyword + attributes, NO superlatives/emoji/medical claims.
+RULES:
+- Output MUST be 100% KOREAN characters — NOT Japanese/Chinese
+- Pattern: 일본 + brand(if known) + keyword + attribute
+- NO superlatives/emoji/medical claims
+- Length: 25-50 Korean chars
 
 Return ONLY: {"title":"Korean 25-50 char title","keyword_used":["kw1"],"char_count":0}

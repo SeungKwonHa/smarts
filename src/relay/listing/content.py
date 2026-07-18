@@ -310,19 +310,27 @@ class ContentAgent(BaseAgent):
                     messages.append({"role": "assistant", "content": str(raw if 'raw' in dir() else "{}")})
                     messages.append({"role": "user", "content": f"Validation error: {e}. Please fix the title and return valid JSON."})
 
-        # Fallback: if both attempts failed, build a compliant title from source name
-        base = (name_src or "일본 프리미엄 상품").strip()
-        fallback = f"일본 {base} 고급 구매대행"
-        if len(fallback) < 25:
-            fallback = f"일본 프리미엄 {base} 고급 구매대행 상품"
-        fallback = fallback[:50]
+        # Fallback: build Korean title from category/brand (NEVER use Japanese name_src)
+        fallback_titles = {
+            "kitchen":    "일본 프리미엄 주방용품 구매대행 정품",
+            "stationery": "일본 프리미엄 문구용품 구매대행 정품",
+            "hobby":      "일본 프리미엄 취미용품 구매대행 정품",
+            "camping":    "일본 프리미엄 캠핑용품 구매대행 정품",
+            "other":      "일본 프리미엄 생활용품 구매대행 정품",
+        }
+        if brand:
+            fallback = f"일본 {brand} {category_internal or '프리미엄'} 구매대행 정품"
+        else:
+            fallback = fallback_titles.get(category_internal, fallback_titles["other"])
+        if len(fallback) < _TITLE_MIN_CHARS:
+            fallback = f"일본 프리미엄 {category_internal or '생활용품'} 구매대행 정품"
+        fallback = fallback[:_TITLE_MAX_CHARS]
+        log.info("title_fallback_used", listing_id_or_none=None, category=category_internal, brand=brand)
         return TitleResult(
             title=fallback,
             keyword_used=[],
             char_count=len(fallback),
         )
-
-        return None
 
     async def _generate_detail(
         self,
@@ -424,7 +432,7 @@ class ContentAgent(BaseAgent):
   <section style="margin:20px 0">
     <h3>📋 상품 스펙</h3>
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
-      <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left;width:30%">상품명</th><td style="padding:8px">{name_src}</td></tr>
+      <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left;width:30%">상품명</th><td style="padding:8px">{title}</td></tr>
       <tr style="background:#fff"><th style="padding:8px;text-align:left">브랜드</th><td style="padding:8px">{brand}</td></tr>
       <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left">카테고리</th><td style="padding:8px">{category_internal}</td></tr>
       <tr style="background:#fff"><th style="padding:8px;text-align:left">판매가</th><td style="padding:8px">₩{sell_price_krw:,}</td></tr>
