@@ -330,19 +330,33 @@ async def update_product(
     if name is not None:
         origin["name"] = name
 
-    # Original price (소비자 가격) — shows as strikethrough with discount
-    orig_price = updates.get("original_price")
-    if orig_price is not None:
-        origin["consumerPrice"] = orig_price
-        # Auto-calculate discount rate
-        sale = origin.get("salePrice", 0)
-        if sale > 0 and orig_price > sale:
-            origin["discountRate"] = round((1 - sale / orig_price) * 100)
+    # Instant discount (상시할인) — customerBenefit.immediateDiscountPolicy
+    # Naver does NOT support consumerPrice via API; use customerBenefit instead.
+    discount_pct = updates.get("discount_percent")
+    if discount_pct is not None:
+        origin["customerBenefit"] = {
+            "immediateDiscountPolicy": {
+                "discountMethod": {
+                    "value": discount_pct,
+                    "unitType": "PERCENT",
+                }
+            }
+        }
 
     # Detail HTML (상세페이지 내용)
     detail = updates.get("detail_html")
     if detail is not None:
         origin["detailContent"] = detail
+
+    # Fix itemName/modelName in productInfoProvidedNotice (제품명 동기화)
+    new_name = updates.get("product_name") or (updates.get("detail_html") and name)
+    if new_name:
+        etc = origin.setdefault("detailAttribute", {}).setdefault(
+            "productInfoProvidedNotice", {}
+        ).setdefault("etc", {})
+        if etc:
+            etc["itemName"] = new_name
+            etc["modelName"] = new_name
 
     # 3. PUT back the full payload
     payload = {
