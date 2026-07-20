@@ -330,18 +330,21 @@ async def update_product(
     if name is not None:
         origin["name"] = name
 
-    # Instant discount (상시할인) — customerBenefit.immediateDiscountPolicy
-    # Naver does NOT support consumerPrice via API; use customerBenefit instead.
+    # NOTE: customerBenefit.immediateDiscountPolicy is INTENTIONALLY NOT USED.
+    # Naver considers showing discounts without a real original price as
+    # "다크패턴" (dark pattern) and sends abuse warnings. See Naver policy:
+    #   "높은 할인율로 보이기 위해 상품의 판매가를 거짓으로 등록하는 경우"
+    # If you need a LEGITIMATE discount, you must either:
+    #   1. Sell at original price first to establish price history, OR
+    #   2. Provide documented proof of original price (e.g. official website URL)
+    # For now, simply lower the sale price instead of showing a fake discount.
     discount_pct = updates.get("discount_percent")
     if discount_pct is not None:
-        origin["customerBenefit"] = {
-            "immediateDiscountPolicy": {
-                "discountMethod": {
-                    "value": discount_pct,
-                    "unitType": "PERCENT",
-                }
-            }
-        }
+        log.warning(
+            "discount_percent_ignored_naver_dark_pattern_policy",
+            channel_product_no=channel_product_no,
+            note="Use lower salePrice instead of fake discount",
+        )
 
     # Detail HTML (상세페이지 내용)
     detail = updates.get("detail_html")
@@ -382,6 +385,54 @@ async def update_product(
         updates=list(updates.keys()),
     )
     return result
+
+
+async def remove_discount(channel_product_no: str) -> bool:
+    """Remove the immediateDiscountPolicy (상시할인) from a product.
+
+    CRITICAL: This must be called for ALL products to comply with Naver's
+    anti-dark-pattern policy. Showing a discount without a real original price
+    is a violation that triggers abuse warnings and account suspension.
+
+    Sets customerBenefit to {} which effectively removes any discount.
+    """
+    if settings.relay_dry_run:
+        log.info("naver_remove_discount_dry_run", channel_product_no=channel_product_no)
+        return True
+
+    await get_token()
+
+    # Fetch current product state
+    current = await http_client.get(
+        f"{_PRODUCT_URL}/channel-products/{channel_product_no}",
+        headers=_auth_header(),
+        cache_s=0,
+    )
+    product = current if isinstance(current, dict) else current.json()
+    origin = product.get("originProduct", {})
+
+    # Remove the discount policy entirely
+    origin["customerBenefit"] = {}
+
+    payload = {
+        "originProduct": origin,
+        "smartstoreChannelProduct": product.get("smartstoreChannelProduct", {}),
+    }
+
+    try:
+        await http_client.put(
+            f"{_PRODUCT_URL}/channel-products/{channel_product_no}",
+            json=payload,
+            headers={**_auth_header(), "Content-Type": "application/json"},
+        )
+        log.info("naver_discount_removed", channel_product_no=channel_product_no)
+        return True
+    except Exception as e:
+        if "409" in str(e) or "conflict" in str(e).lower():
+            log.info("naver_remove_discount_idempotent", channel_product_no=channel_product_no)
+            return True
+        log.error("naver_remove_discount_failed", channel_product_no=channel_product_no, error=str(e))
+        return False
 
 
 async def suspend_product(channel_product_no: str) -> bool:
